@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Lucky Amplop — Bonus 50:50</title>
+<style>
+  :root{ --bg1:#ffecd2; --bg2:#fcb69f; }
+  *{box-sizing:border-box}
+  body{
+    margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+    font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; background:linear-gradient(135deg,var(--bg1),var(--bg2));
+    padding:12px;
+  }
+  .wrap{width:100%; max-width:420px; background:#fff; border-radius:14px; padding:18px; box-shadow:0 8px 30px rgba(0,0,0,.12); text-align:center}
+  h1{font-size:1.15rem; margin:0 0 10px}
+  .muted{color:#666; font-size:.95rem; margin-bottom:12px}
+
+  button,input,textarea{
+    font-size:16px; border-radius:10px; border:0; padding:12px 14px;
+  }
+  .btn-primary{background:#ff6b6b;color:#fff;width:100%}
+  .btn-ghost{background:#fff;border:1px solid #e6e6e6;color:#333;width:100%}
+
+  input[type="text"]{
+    width:70%; max-width:260px; padding:10px; border:1px solid #ddd; border-radius:10px; text-align:center;
+    margin-top:10px;
+  }
+
+  textarea{
+    width:90%; max-width:320px; height:70px; border:1px solid #ccc; border-radius:10px;
+    margin-top:10px; padding:8px; font-size:14px;
+  }
+
+  .envelopes{
+    margin-top:18px;
+    display:grid;
+    grid-template-columns:repeat(2, minmax(0,1fr));
+    gap:12px;
+    justify-items:center;
+  }
+
+  .envelope{
+    width:86px; height:66px; border-radius:10px; display:flex; align-items:center; justify-content:center;
+    position:relative; color:#fff; cursor:pointer; box-shadow:0 6px 16px rgba(0,0,0,.12);
+  }
+  .env-svg{ width:36px; height:28px; display:block; }
+  .env-num{ position:absolute; right:8px; bottom:6px; font-size:12px; font-weight:700; opacity:.95 }
+
+  /* popup */
+  .popup{ position:fixed; inset:0; display:none; background:rgba(0,0,0,.6); align-items:center; justify-content:center; z-index:50 }
+  .popup.show{ display:flex }
+  .popup-card{ width:92%; max-width:360px; background:#fff; border-radius:12px; padding:16px; text-align:center }
+  .popup-card p{ margin:10px 0 }
+  .small{font-size:.95rem; color:#444}
+  @media(min-width:480px){ .envelope{width:100px;height:72px} }
+</style>
+</head>
+<body>
+  <div class="wrap" id="app">
+    <!-- START -->
+    <div id="startScreen">
+      <h1>Selamat Datang di Lucky Amplop</h1>
+      <p class="muted">Semoga Beruntung.</p>
+      <button class="btn-primary" onclick="showName()">Mulai Game</button>
+    </div>
+
+    <!-- NAME -->
+    <div id="nameScreen" style="display:none">
+      <h1>Masukkan Nama</h1>
+      <input id="playerName" type="text" placeholder="Nama Anda" autocomplete="name" />
+      <div style="height:8px"></div>
+      <button class="btn-primary" onclick="beginGame()">Lanjut</button>
+    </div>
+
+    <!-- GAME -->
+    <div id="gameScreen" style="display:none">
+      <h1>Pilih Amplop</h1>
+      <div class="muted">Isi amplop: 3 pertanyaan · 6 zonk · 1 bonus </div>
+      <div class="envelopes" id="envelopes"></div>
+      <div style="height:6px"></div>
+    </div>
+  </div>
+
+  <!-- POPUP -->
+  <div id="popup" class="popup" onclick="if(event.target.id==='popup'){ closePopup() }">
+    <div class="popup-card" id="popupCard"></div>
+  </div>
+
+  <!-- FORM tersembunyi untuk kirim ke Google Sheet -->
+  <form id="wishForm" method="POST" target="hidden_iframe">
+    <input type="hidden" name="name" id="formName">
+    <input type="hidden" name="envelope" id="formEnvelope">
+    <input type="hidden" name="answer" id="formAnswer">
+    <input type="hidden" name="wish" id="formWish">
+    <input type="hidden" name="timestamp" id="formTimestamp">
+  </form>
+  <iframe name="hidden_iframe" style="display:none"></iframe>
+
+<script>
+/* ===== KONFIGURASI ===== */
+const baseurl = "https://script.google.com/macros/s/AKfycbzrtphmz0gP04gryEM5T7nravQN2LZPiZkXcNBjb-EzaMLJoJoxghMvqYwyq3E7Xu3O/exec";
+
+/* ===== data ===== */
+const QUESTIONS = [
+  {q:"Tanggal berapa Ulang Tahun Karo?", a:"7 agustus"},
+  {q:"Cucu karo paling muda?", a:"geraldin"},
+  {q:"Ukuran sepatu karo?", a:"37"},
+  {q:"Tahun 2022 berapa usia Karo?", a:"72"},
+  {q:"Merk handphone karo?", a:"vivo"}
+];
+const COLORS = ["#e63946","#457b9d","#2a9d8f","#f4a261","#8d99ae","#06d6a0","#ef476f","#118ab2"];
+
+/* state */
+let envelopesData = [];
+let shuffleTimer = null;
+let playerName = "";
+let bonusUsed = false;
+let bonusChanceActive = false;
+let selectedQuestion = null;
+let lastEnvelope = "";
+let lastAnswer = "";
+
+/* SVG */
+const envelopeSVG = `<svg class="env-svg" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <path fill="currentColor" d="M2 6c0-1.1.9-2 2-2h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6zm2 .5v.8l7 4.9 7-4.9v-.8L12 11 4 6.5z"/>
+</svg>`;
+
+/* ===== UI helpers ===== */
+function $(id){return document.getElementById(id)}
+function showName(){ $('startScreen').style.display='none'; $('nameScreen').style.display='block'; }
+function beginGame(){
+  const v = $('playerName').value.trim();
+  if(!v){ alert('Isi nama dulu'); return; }
+  playerName = v;
+  $('nameScreen').style.display='none';
+  $('gameScreen').style.display='block';
+  startShuffle();
+  generateEnvelopes();
+}
+
+/* generate & render */
+function generateEnvelopes(){
+  const pool = ["pertanyaan","pertanyaan","pertanyaan","zonk","zonk","zonk","zonk","zonk","zonk","bonus"];
+  envelopesData = shuffle([...pool]);
+  renderEnvelopes();
+}
+
+function renderEnvelopes(){
+  const cont = $('envelopes');
+  cont.innerHTML = '';
+  envelopesData.forEach((content, idx)=>{
+    const div = document.createElement('div');
+    div.className='envelope';
+    div.style.background = COLORS[idx % COLORS.length];
+    div.innerHTML = `${envelopeSVG}<div class="env-num">${idx+1}</div>`;
+    div.dataset.index = idx;
+    div.dataset.content = content;
+    div.onclick = ()=>{ onEnvelopeClick(idx) };
+    cont.appendChild(div);
+  });
+}
+
+/* shuffle util */
+function shuffle(arr){
+  for(let i=arr.length-1;i>0;i--){
+    const j = Math.floor(Math.random()*(i+1));
+    [arr[i],arr[j]] = [arr[j],arr[i]];
+  }
+  return arr;
+}
+
+/* auto shuffle timer */
+function startShuffle(){
+  stopShuffle();
+  shuffleTimer = setInterval(()=>{ generateEnvelopes(); },15000);
+}
+function stopShuffle(){ if(shuffleTimer){ clearInterval(shuffleTimer); shuffleTimer=null } }
+
+/* when user clicks envelope */
+function onEnvelopeClick(index){
+  stopShuffle();
+  const content = envelopesData[index];
+  lastEnvelope = content;
+  openContent(content);
+}
+
+/* popup helpers */
+function openPopup(html){ $('popupCard').innerHTML = html; $('popup').classList.add('show'); }
+function closePopup(){ $('popup').classList.remove('show'); }
+
+/* handle content */
+function openContent(content){
+  if(content === 'zonk'){
+    openPopup(`<h3>😅 ZONK</h3><p class="small">Sayang, tidak dapat hadiah.</p><button onclick="showWishBox()">Tulis Harapan</button>`);
+    return;
+  }
+
+  if(content === 'bonus'){
+    if(bonusUsed){
+      openPopup(`<h3>Bonus sudah dipakai</h3><p class="small">Kamu sudah menggunakan bonus.</p><button onclick="showWishBox()">Tulis Harapan</button>`);
+      return;
+    }
+    bonusUsed = true;
+    bonusChanceActive = true;
+    openPopup(`<h3>🎁 BONUS</h3><p class="small">Kamu dapat kesempatan sekali lagi untuk memilih amplop dengan peluang 50:50.</p><button onclick="closePopup()">Oke</button>`);
+    return;
+  }
+
+  if(content === 'pertanyaan'){
+    if(bonusChanceActive){
+      bonusChanceActive = false;
+      const win = Math.random() < 0.5;
+      if(!win){
+        openPopup(`<h3>🎲 BONUS GAGAL</h3><p class="small">Sayang, kesempatan bonusmu zonk.</p><button onclick="showWishBox()">Tulis Harapan</button>`);
+        return;
+      }
+    }
+    selectedQuestion = QUESTIONS[Math.floor(Math.random()*QUESTIONS.length)];
+    showQuestionPopup(selectedQuestion.q, selectedQuestion.a);
+    return;
+  }
+}
+
+/* show question popup */
+function showQuestionPopup(questionText, answerCorrect){
+  openPopup(`
+    <h3>Pertanyaan</h3>
+    <p class="small">${escapeHtml(questionText)}</p>
+    <input id="answerInput" type="text" placeholder="Jawaban Anda" style="width:82%;padding:10px;border:1px solid #ddd;border-radius:8px;margin-top:8px" />
+    <div style="height:8px"></div>
+    <button onclick="submitAnswer()">Kirim Jawaban</button>
+  `);
+}
+
+/* check answer */
+function submitAnswer(){
+  const input = document.getElementById('answerInput');
+  if(!input) return;
+  const val = (input.value||'').trim().toLowerCase();
+  lastAnswer = val;
+  const correct = (selectedQuestion && String(selectedQuestion.a||'').trim().toLowerCase()) || '';
+  if(val === correct){
+    $('popupCard').innerHTML = `<h3>✅ Benar!</h3><p class="small">Selamat — Anda mendapatkan doorprize.</p><button onclick="showWishBox()">Tulis Harapan</button>`;
+  } else {
+    $('popupCard').innerHTML = `<h3>❌ Salah</h3><p class="small">Jawaban yang benar: <b>${escapeHtml(correct)}</b></p><button onclick="showWishBox()">Tulis Harapan</button>`;
+  }
+}
+
+/* wish box */
+function showWishBox(){
+  $('popupCard').innerHTML = `
+    <h3>💌 Tulis Harapan</h3>
+    <textarea id="wishText" placeholder="Tulis harapan untuk yang berulang tahun..."></textarea>
+    <div style="height:8px"></div>
+    <button onclick="submitWish()">Kirim Harapan</button>
+  `;
+}
+
+function submitWish(){
+  const wish = (document.getElementById('wishText').value||'').trim();
+  if(!wish){ alert("Harapan tidak boleh kosong"); return; }
+
+  // Isi field ke form
+  document.getElementById("formName").value = playerName;
+  document.getElementById("formEnvelope").value = lastEnvelope;
+  document.getElementById("formAnswer").value = lastAnswer;
+  document.getElementById("formWish").value = wish;
+  document.getElementById("formTimestamp").value = new Date().toISOString();
+
+  // Set action form pakai baseurl
+  document.getElementById("wishForm").action = baseurl;
+
+  // Submit form
+  document.getElementById("wishForm").submit();
+
+  // Ubah UI popup
+  $('popupCard').innerHTML = `
+    <h3>🙏 Terima Kasih</h3>
+    <p class="small">Harapanmu sudah terkirim.</p>
+    <button onclick="closePopup()">Tutup</button>
+  `;
+}
+
+function escapeHtml(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }
+</script>
+</body>
+</html>
