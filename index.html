@@ -280,9 +280,14 @@ function submitWish(){
     <p class="small">Harapanmu sudah terkirim.</p>
     <button onclick="closePopup()">Tutup</button>
   `;
+  setTimeout(()=>{
+    window.close(); // kalau tab dibuka via window.open()
+    window.location.href = "about:blank"; // fallback: redirect keluar
+  },2000);
 }
 
 function escapeHtml(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }
 </script>
 </body>
 </html>
+
